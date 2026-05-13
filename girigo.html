@@ -777,6 +777,11 @@
     .celeb-sub { font-size: 34px; }
     .emoji-float { font-size: 24px; }
   }
+
+  @keyframes pulseHint {
+    0%, 100% { opacity: 0.4; transform: translateY(0); }
+    50% { opacity: 0.8; transform: translateY(-4px); }
+  }
 </style>
 </head>
 <body>
@@ -793,6 +798,7 @@ var celebGain = null;
 var isDarkPlaying = false;
 var isCelebPlaying = false;
 var audioUnlocked = false;  // mobile: unlocked after first touch
+var _firstTouchDone = false; // track if user has interacted yet
 
 // ---- Mobile-safe AudioContext init (MUST be in touch event chain) ----
 function unlockAudio() {
@@ -807,12 +813,23 @@ function unlockAudio() {
     src.connect(ctx.destination);
     src.start(0);
     audioUnlocked = true;
-  } catch(e) { /* ignore */ }
+    console.log('[GIRIGO] Audio unlocked');
+  } catch(e) { console.warn('[GIRIGO] unlockAudio error:', e); }
 }
 
-// Unlock on any touch interaction anywhere on page
-document.addEventListener('touchend', unlockAudio, { once: false, passive: true });
-document.addEventListener('click', unlockAudio, { once: false, passive: true });
+// Unlock on ANY touch/click — NOT passive, so iOS treats it as real gesture
+document.addEventListener('touchstart', function(e) {
+  unlockAudio();
+  _firstTouchDone = true;
+}, { once: false, passive: false });
+document.addEventListener('touchend', function(e) {
+  unlockAudio();
+  _firstTouchDone = true;
+}, { once: false, passive: false });
+document.addEventListener('click', function(e) {
+  unlockAudio();
+  _firstTouchDone = true;
+}, { once: false, passive: false });
 
 function getAudioCtx() {
   if (!audioCtx) {
@@ -878,25 +895,37 @@ function startDarkBGM() {
 }
 
 function scheduleDarkWhispers(ctx, dest) {
-  function whisper() {
-    if (!isDarkPlaying || !darkGain) return;
-    setTimeout(whisper, 4000 + Math.random() * 6000);
-    var freqs = [[880, 932], [1046, 1108], [1318, 1397], [784, 830], [1174, 1244]];
-    var pair = freqs[Math.floor(Math.random() * freqs.length)];
-    var now = ctx.currentTime;
-    for (var i = 0; i < 2; i++) {
-      var o = ctx.createOscillator();
-      o.type = i === 0 ? 'sine' : 'triangle';
-      o.frequency.value = pair[i];
-      var g = ctx.createGain();
-      g.gain.setValueAtTime(0, now);
-      g.gain.linearRampToValueAtTime(0.06, now + 0.15);
-      g.gain.exponentialRampToValueAtTime(0.001, now + 1.5 + Math.random());
-      o.connect(g); g.connect(dest);
-      o.start(now); o.stop(now + 2);
-    }
+  // Use AudioContext timeline scheduling instead of setTimeout
+  // This is safe on iOS because oscillators are scheduled at creation time
+  var whisperPairs = [[880, 932], [1046, 1108], [1318, 1397], [784, 830], [1174, 1244]];
+  var startTime = ctx.currentTime + 2.0; // first whisper after 2s
+
+  for (var w = 0; w < 12; w++) {
+    (function(idx, t) {
+      var pair = whisperPairs[idx % whisperPairs.length];
+      // Oscillator 1 — sine
+      var o1 = ctx.createOscillator();
+      o1.type = 'sine'; o1.frequency.value = pair[0];
+      var g1 = ctx.createGain();
+      g1.gain.setValueAtTime(0, t);
+      g1.gain.linearRampToValueAtTime(0.06, t + 0.15);
+      g1.gain.exponentialRampToValueAtTime(0.001, t + 1.5 + Math.random() * 0.5);
+      o1.connect(g1); g1.connect(dest);
+      o1.start(t); o1.stop(t + 2.2);
+
+      // Oscillator 2 — triangle
+      var o2 = ctx.createOscillator();
+      o2.type = 'triangle'; o2.frequency.value = pair[1];
+      var g2 = ctx.createGain();
+      g2.gain.setValueAtTime(0, t);
+      g2.gain.linearRampToValueAtTime(0.04, t + 0.15);
+      g2.gain.exponentialRampToValueAtTime(0.001, t + 1.3 + Math.random() * 0.4);
+      o2.connect(g2); g2.connect(dest);
+      o2.start(t); o2.stop(t + 2.0);
+
+      darkOscs.push(o1, o2);
+    })(w, startTime + w * (4 + Math.random() * 4)); // every 4-8 seconds
   }
-  setTimeout(whisper, 2000);
 }
 
 function stopDarkBGM(fadeMs) {
@@ -1074,6 +1103,9 @@ function stopCelebBGM(fadeMs) {
       <div class="brand-kr">기리고</div>
       <div class="brand-line"></div>
     </div>
+
+    <!-- Mobile touch hint — fades out after first interaction -->
+    <div id="tapHint" style="position:absolute;bottom:14%;left:0;right:0;text-align:center;color:rgba(255,255,255,0.55);font-size:13px;letter-spacing:3px;text-transform:uppercase;font-family:-apple-system,sans-serif;animation:pulseHint 2s infinite ease-in-out;pointer-events:none;z-index:5;">👆 点击屏幕开始</div>
 
     <!-- Clickable hands icon -->
     <div class="hero-hands" id="clickHands">
@@ -1426,7 +1458,8 @@ function go(id) {
 
   // ---- AUDIO: page-specific BGM switching ----
   if (id === 'home' || id === 'room' || id === 'record' || id === 'review' || id === 'transmit' || id === 'result') {
-    if (!isDarkPlaying) { unlockAudio(); startDarkBGM(); }
+    unlockAudio();
+    if (!isDarkPlaying) { startDarkBGM(); }
     if (isCelebPlaying) { stopCelebBGM(300); }
   } else if (id === 'celebration') {
     // Celebration page — fade out dark music quickly, start celebration
@@ -1456,12 +1489,40 @@ function go(id) {
   }
 }
 
+// ---- FIRST TOUCH on HOME → start music immediately ----
+// On mobile, the first tap anywhere on home screen unlocks + starts dark BGM
+(function setupFirstTouchMusic() {
+  var homeEl = document.getElementById('home');
+  if (!homeEl) return;
+
+  function onFirstTouch(e) {
+    // Hide tap hint
+    var hint = document.getElementById('tapHint');
+    if (hint) { hint.style.transition = 'opacity 0.5s'; hint.style.opacity = '0'; setTimeout(function() { hint.remove(); }, 600); }
+    if (_firstTouchDone && isDarkPlaying) return; // already playing
+    unlockAudio();
+    // Start BGM immediately — AudioContext already unlocked by global touch handlers above
+    if (!isDarkPlaying) {
+      startDarkBGM();
+    }
+  }
+
+  homeEl.addEventListener('touchend', onFirstTouch, { passive: false });
+  homeEl.addEventListener('click', onFirstTouch, { passive: false });
+})();
+
 // ---- HOME → tap hands ----
 document.getElementById('clickHands').addEventListener('click', function() {
   startTimer();
   go('room');
-  unlockAudio();
-  if (!isDarkPlaying) { startDarkBGM(); }
+  // Music already started by unlockAudio on first touch
+});
+// Also handle touch for mobile
+document.getElementById('clickHands').addEventListener('touchend', function(e) {
+  // Prevent double-fire: touchend fires then click also fires on mobile
+  if (e && e.defaultPrevented) return;
+  startTimer();
+  go('room');
 });
 
 function startTimer() {
