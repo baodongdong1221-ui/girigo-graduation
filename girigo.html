@@ -833,7 +833,20 @@ function unlockAudio() {
     src.connect(ctx.destination);
     src.start(0);
     audioUnlocked = true;
-    _dbg('Silent buffer played. audioUnlocked=true');
+    _dbg('Silent buffer played. audioUnlocked=true, final state=' + ctx.state);
+
+    // iOS: state may become "interrupted" after silent buffer — schedule a safety resume
+    (function safetyResume() {
+      setTimeout(function() {
+        if (audioCtx && audioCtx.state === 'interrupted') {
+          _dbg('Safety resume: context is interrupted, resuming...');
+          audioCtx.resume().then(function() { _dbg('Safety resume: ok, state=' + audioCtx.state); });
+        } else if (audioCtx) {
+          _dbg('Safety resume: state=' + audioCtx.state + ' (ok)');
+        }
+      }, 200);
+    })();
+
   } catch(e) { _dbg('unlockAudio ERROR: ' + e.message); }
 }
 
@@ -852,6 +865,12 @@ document.addEventListener('click', function(e) {
 }, { once: false, passive: false });
 
 function getAudioCtx() {
+  // If context is interrupted or closed, recreate it entirely
+  if (audioCtx && (audioCtx.state === 'interrupted' || audioCtx.state === 'closed')) {
+    _dbg('getAudioCtx: state=' + audioCtx.state + ', RECREATING context');
+    try { audioCtx.close(); } catch(e) {}
+    audioCtx = null;
+  }
   if (!audioCtx) {
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     _dbg('New AudioContext created, state=' + audioCtx.state);
@@ -868,9 +887,25 @@ function getAudioCtx() {
 function startDarkBGM() {
   if (isDarkPlaying) { _dbg('startDarkBGM: already playing, skip'); return; }
   _dbg('startDarkBGM() called');
+
+  // CRITICAL: ensure context is actually running before creating oscillators
   var ctx = getAudioCtx();
-  _dbg('startDarkBGM: ctx state=' + ctx.state + ', currentTime=' + ctx.currentTime);
+  _dbg('startDarkBGM: initial ctx state=' + ctx.state + ', currentTime=' + ctx.currentTime);
+
+  if (ctx.state !== 'running') {
+    _dbg('startDarkBGM: context not running (' + ctx.state + '), will retry after resume');
+    ctx.resume().then(function() {
+      _dbg('startDarkBGM: resume done, state=' + ctx.state + ', calling startDarkBGM again');
+      isDarkPlaying = false; // reset so re-entry works
+      startDarkBGM();
+    }).catch(function(e) {
+      _dbg('startDarkBGM: resume failed: ' + e.message);
+    });
+    return;
+  }
+
   isDarkPlaying = true;
+  _dbg('startDarkBgm: CONFIRMED running, creating oscillators now');
 
   darkGain = ctx.createGain();
   darkGain.gain.setValueAtTime(0, ctx.currentTime);
@@ -973,9 +1008,22 @@ function stopDarkBGM(fadeMs) {
 function startCelebBGM() {
   if (isCelebPlaying) { _dbg('startCelebBGM: already playing, skip'); return; }
   _dbg('startCelebBGM() called');
+
   var ctx = getAudioCtx();
   _dbg('startCelebBGM: ctx state=' + ctx.state + ', currentTime=' + ctx.currentTime);
+
+  if (ctx.state !== 'running') {
+    _dbg('startCelebBGM: context not running, retrying after resume');
+    ctx.resume().then(function() {
+      _dbg('startCelebBGM: resume done, retrying');
+      isCelebPlaying = false;
+      startCelebBGM();
+    }).catch(function(e) { _dbg('startCelebBGM: resume fail: ' + e.message); });
+    return;
+  }
+
   isCelebPlaying = true;
+  _dbg('startCelebBGM: CONFIRMED running, creating oscillators');
 
   celebGain = ctx.createGain();
   // Start at near-zero — will be ramped up by the caller after transition
