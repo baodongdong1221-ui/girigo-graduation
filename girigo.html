@@ -800,29 +800,18 @@ var isCelebPlaying = false;
 var audioUnlocked = false;  // mobile: unlocked after first touch
 var _firstTouchDone = false; // track if user has interacted yet
 
-// ---- VISUAL DEBUG PANEL (mobile) ----
+// ---- VISUAL DEBUG PANEL (mobile) — ALWAYS VISIBLE ----
 (function initDebugPanel() {
   var dp = document.createElement('div');
   dp.id = 'girigoDebug';
-  dp.style.cssText = 'position:fixed;top:0;left:0;right:0;background:rgba(255,0,0,0.9);color:#fff;font-size:11px;font-family:monospace;padding:4px 8px;z-index:99999;max-height:40vh;overflow:auto;line-height:1.5;display:none;';
+  dp.style.cssText = 'position:fixed;top:0;left:0;right:0;background:rgba(255,0,0,0.92);color:#fff;font-size:11px;font-family:monospace;padding:4px 8px;z-index:99999;max-height:40vh;overflow:auto;line-height:1.5;';
   document.body.appendChild(dp);
   window._dbg = function(msg) {
     var t = document.getElementById('girigoDebug');
-    if (t) { t.style.display = 'block'; t.textContent += msg + '\\n'; }
+    if (t) { t.textContent += msg + '\n'; t.scrollTop = t.scrollHeight; }
     console.log('[GIRIGO] ' + msg);
   };
-  // Show/hide with 3-finger tap
-  var tapCount = 0, lastTap = 0;
-  document.addEventListener('touchend', function(e) {
-    var now = Date.now();
-    if (now - lastTap < 400) { tapCount++; } else { tapCount = 1; }
-    lastTap = now;
-    if (tapCount >= 3) {
-      var d = document.getElementById('girigoDebug');
-      if (d) d.style.display = d.style.display === 'none' ? 'block' : 'none';
-      tapCount = 0;
-    }
-  }, { passive: true });
+  _dbg('DEBUG PANEL READY - waiting for touch...');
 })();
 
 // ---- Mobile-safe AudioContext init (MUST be in touch event chain) ----
