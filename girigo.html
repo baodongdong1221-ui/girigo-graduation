@@ -800,12 +800,43 @@ var isCelebPlaying = false;
 var audioUnlocked = false;  // mobile: unlocked after first touch
 var _firstTouchDone = false; // track if user has interacted yet
 
+// ---- VISUAL DEBUG PANEL (mobile) ----
+(function initDebugPanel() {
+  var dp = document.createElement('div');
+  dp.id = 'girigoDebug';
+  dp.style.cssText = 'position:fixed;top:0;left:0;right:0;background:rgba(255,0,0,0.9);color:#fff;font-size:11px;font-family:monospace;padding:4px 8px;z-index:99999;max-height:40vh;overflow:auto;line-height:1.5;display:none;';
+  document.body.appendChild(dp);
+  window._dbg = function(msg) {
+    var t = document.getElementById('girigoDebug');
+    if (t) { t.style.display = 'block'; t.textContent += msg + '\\n'; }
+    console.log('[GIRIGO] ' + msg);
+  };
+  // Show/hide with 3-finger tap
+  var tapCount = 0, lastTap = 0;
+  document.addEventListener('touchend', function(e) {
+    var now = Date.now();
+    if (now - lastTap < 400) { tapCount++; } else { tapCount = 1; }
+    lastTap = now;
+    if (tapCount >= 3) {
+      var d = document.getElementById('girigoDebug');
+      if (d) d.style.display = d.style.display === 'none' ? 'block' : 'none';
+      tapCount = 0;
+    }
+  }, { passive: true });
+})();
+
 // ---- Mobile-safe AudioContext init (MUST be in touch event chain) ----
 function unlockAudio() {
   if (audioUnlocked) return;
   try {
+    _dbg('unlockAudio() called, audioUnlocked=' + audioUnlocked);
     var ctx = getAudioCtx();
-    if (ctx.state === 'suspended') { ctx.resume(); }
+    _dbg('Context created, state=' + ctx.state + ', sampleRate=' + ctx.sampleRate);
+    if (ctx.state === 'suspended') {
+      ctx.resume().then(function() { _dbg('resume() resolved, state=' + ctx.state); }).catch(function(err) { _dbg('resume() FAILED: ' + err.message); });
+    } else {
+      _dbg('Context not suspended, state=' + ctx.state);
+    }
     // Create a short silent buffer to fully unlock iOS Safari
     var buf = ctx.createBuffer(1, 1, ctx.sampleRate);
     var src = ctx.createBufferSource();
@@ -813,8 +844,8 @@ function unlockAudio() {
     src.connect(ctx.destination);
     src.start(0);
     audioUnlocked = true;
-    console.log('[GIRIGO] Audio unlocked');
-  } catch(e) { console.warn('[GIRIGO] unlockAudio error:', e); }
+    _dbg('Silent buffer played. audioUnlocked=true');
+  } catch(e) { _dbg('unlockAudio ERROR: ' + e.message); }
 }
 
 // Unlock on ANY touch/click — NOT passive, so iOS treats it as real gesture
@@ -834,11 +865,10 @@ document.addEventListener('click', function(e) {
 function getAudioCtx() {
   if (!audioCtx) {
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    _dbg('New AudioContext created, state=' + audioCtx.state);
   }
   if (audioCtx.state === 'suspended') {
-    // On mobile, resume() must be inside a user gesture handler
-    // We already handle this via unlockAudio() on touchend/click
-    audioCtx.resume().catch(function(){});
+    audioCtx.resume().then(function() { _dbg('getAudioCtx: resume ok, state=' + audioCtx.state); }).catch(function(e) { _dbg('getAudioCtx: resume FAIL ' + e.message); });
   }
   return audioCtx;
 }
@@ -847,8 +877,10 @@ function getAudioCtx() {
 //  DARK / EERIE BGM — low drone, dissonant, occasional shriek
 // ============================================================
 function startDarkBGM() {
-  if (isDarkPlaying) return;
+  if (isDarkPlaying) { _dbg('startDarkBGM: already playing, skip'); return; }
+  _dbg('startDarkBGM() called');
   var ctx = getAudioCtx();
+  _dbg('startDarkBGM: ctx state=' + ctx.state + ', currentTime=' + ctx.currentTime);
   isDarkPlaying = true;
 
   darkGain = ctx.createGain();
@@ -950,8 +982,10 @@ function stopDarkBGM(fadeMs) {
 // gain starts near-zero and ramps up when page becomes visible.
 // ============================================================
 function startCelebBGM() {
-  if (isCelebPlaying) return;
+  if (isCelebPlaying) { _dbg('startCelebBGM: already playing, skip'); return; }
+  _dbg('startCelebBGM() called');
   var ctx = getAudioCtx();
+  _dbg('startCelebBGM: ctx state=' + ctx.state + ', currentTime=' + ctx.currentTime);
   isCelebPlaying = true;
 
   celebGain = ctx.createGain();
@@ -1453,6 +1487,7 @@ var timerHandle = null;
 var txTimeout = null;
 
 function go(id) {
+  _dbg('go(' + id + ') called, audioUnlocked=' + audioUnlocked + ' isDarkPlaying=' + isDarkPlaying + ' isCelebPlaying=' + isCelebPlaying);
   // cancel pending auto-advance
   if (txTimeout) { clearTimeout(txTimeout); txTimeout = null; }
 
