@@ -1386,7 +1386,6 @@ function stopCelebBGM(fadeMs) {
         <div><div class="grid-num" id="nNight">0</div><div class="grid-lbl">Silent nights</div></div>
         <div class="grid-note">Numbers are atmospheric. No user data is tracked.</div>
       </div>
-      <button class="btn btn-red" style="margin-top:28px;" id="clickReturn">RETURN</button>
     </div>
     <div class="footer-text">Girigo remembers</div>
   </div>
@@ -1533,18 +1532,10 @@ document.getElementById('clickSend').addEventListener('click', function() {
   }, 4500);
 });
 
-// ---- RESULT → return ----
-document.getElementById('clickReturn').addEventListener('click', function() {
-  // reset tally
-  document.getElementById('nWish').textContent = '\u221e';
-  document.getElementById('nName').textContent = '\u2014';
-  document.getElementById('nEcho').textContent = '?';
-  document.getElementById('nNight').textContent = '0';
-  // stop timer
-  if (timerHandle) { clearInterval(timerHandle); timerHandle = null; }
-  resetRings();
-  stopCelebBGM(300);
-  go('home');
+// ---- RESULT → tap anywhere → CELEBRATION ----
+document.getElementById('result').addEventListener('click', function(e) {
+  go('celebration');
+  launchConfetti();
 });
 
 // ---- RINGS control ----
@@ -1558,20 +1549,15 @@ function resetRings() {
   }
 }
 function startRings() {
-  resetRings(); // ensure clean state
+  resetRings();
   var rs = [document.getElementById('tr1'), document.getElementById('tr2'), document.getElementById('tr3')];
   for (var i = 0; i < 3; i++) {
-    if (rs[i]) {
-      // force reflow then add class
-      void rs[i].offsetWidth;
-      rs[i].classList.add('go');
-    }
+    if (rs[i]) { void rs[i].offsetWidth; rs[i].classList.add('go'); }
   }
 }
 
 // ---- TALLY animation ----
 function runTally() {
-  // whispers counter
   var wEl = document.getElementById('nWish');
   if (wEl) {
     var n = 0, tgt = Math.floor(Math.random() * 90000) + 10000;
@@ -1581,7 +1567,6 @@ function runTally() {
       wEl.textContent = n.toLocaleString();
     }, 40);
   }
-  // names counter
   var nEl = document.getElementById('nName');
   if (nEl) {
     var n = 0, tgt = Math.floor(Math.random() * 3000) + 500;
@@ -1591,27 +1576,13 @@ function runTally() {
       nEl.textContent = n.toLocaleString();
     }, 40);
   }
-  // echoes
   var eEl = document.getElementById('nEcho');
   if (eEl) {
-    setTimeout(function() {
-      eEl.textContent = String(Math.floor(Math.random() * 999) + 1);
-    }, 1200);
+    setTimeout(function() { eEl.textContent = String(Math.floor(Math.random() * 999) + 1); }, 1200);
   }
-  // nights
   var niEl = document.getElementById('nNight');
-  if (niEl) {
-    niEl.textContent = String(Math.floor(Math.random() * 7));
-  }
+  if (niEl) { niEl.textContent = String(Math.floor(Math.random() * 7)); }
 }
-
-// ---- RESULT → tap anywhere → CELEBRATION ----
-document.getElementById('result').addEventListener('click', function(e) {
-  // don't trigger if clicking the return button itself (that's handled separately)
-  if (e.target.closest('#clickReturn')) return;
-  go('celebration');
-  launchConfetti();
-});
 
 // ---- CELEBRATION → return home ----
 document.getElementById('clickCelebrationReturn').addEventListener('click', function() {
