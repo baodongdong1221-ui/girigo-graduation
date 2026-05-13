@@ -780,6 +780,305 @@
 </style>
 </head>
 <body>
+<!-- ============================================================ -->
+<!--  AUDIO ENGINE — Web Audio API synthesized BGM              -->
+<!-- ============================================================ -->
+<script>
+// ---- Audio Context singleton (created on first user interaction) ----
+var audioCtx = null;
+var darkOscs = [];      // dark mode oscillators
+var darkGain = null;    // dark master gain
+var celebOscs = [];     // celebration oscillators
+var celebGain = null;   // celebration master gain
+var isDarkPlaying = false;
+var isCelebPlaying = false;
+
+function getAudioCtx() {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  if (audioCtx.state === 'suspended') { audioCtx.resume(); }
+  return audioCtx;
+}
+
+// ============================================================
+//  DARK / EERIE BGM — low drone, dissonant, occasional shriek
+// ============================================================
+function startDarkBGM() {
+  if (isDarkPlaying) return;
+  var ctx = getAudioCtx();
+  isDarkPlaying = true;
+
+  // Master gain — starts quiet
+  darkGain = ctx.createGain();
+  darkGain.gain.setValueAtTime(0, ctx.currentTime);
+  darkGain.gain.linearRampToValueAtTime(0.35, ctx.currentTime + 3);
+  darkGain.connect(ctx.destination);
+
+  // Sub bass drone — very low, pulsing slowly
+  function makeDrone(freq, type, vol, detune) {
+    var o = ctx.createOscillator();
+    o.type = type;
+    o.frequency.value = freq;
+    if (detune) o.detune.value = detune;
+    var g = ctx.createGain();
+    g.gain.value = vol;
+    // subtle LFO for movement
+    var lfo = ctx.createOscillator();
+    lfo.type = 'sine';
+    lfo.frequency.value = 0.08 + Math.random() * 0.15;
+    var lfoG = ctx.createGain();
+    lfoG.gain.value = vol * 0.25;
+    lfo.connect(lfoG);
+    lfoG.connect(g.gain);
+    o.connect(g);
+    g.connect(darkGain);
+    o.start();
+    lfo.start();
+    darkOscs.push(o, lfo);
+    return { osc: o, gain: g, lfo: lfo };
+  }
+
+  // Deep sub drone (A1 ~55Hz) — the foundation of dread
+  makeDrone(55, 'sine', 0.4);
+  // Dissonant companion (between A and Bb) — creates unease
+  makeDrone(58.5, 'sine', 0.2, 8);
+  // Low mid growl (D3 ~147Hz) — triangle for roughness
+  makeDrone(147, 'triangle', 0.08);
+  // High faint shimmer (E5 ~659Hz) with slow tremolo — like distant ghost
+  var shi = ctx.createOscillator();
+  shi.type = 'sine';
+  shi.frequency.value = 659;
+  var shiG = ctx.createGain();
+  shiG.gain.value = 0.03;
+  var shiLFO = ctx.createOscillator();
+  shiLFO.type = 'sine';
+  shiLFO.frequency.value = 0.3;
+  var shiLFOG = ctx.createGain();
+  shiLFOG.gain.value = 0.03;
+  shiLFO.connect(shiLFOG);
+  shiLFOG.connect(shiG.gain);
+  shi.connect(shiG);
+  shiG.connect(darkGain);
+  shi.start(); shiLFO.start();
+  darkOscs.push(shi, shiLFO);
+
+  // Occasional eerie high-pitched "whisper" notes
+  scheduleDarkWhispers(ctx, darkGain);
+}
+
+function scheduleDarkWhispers(ctx, dest) {
+  function whisper() {
+    if (!isDarkPlaying || !darkGain) return;
+    // random interval 4-10 seconds
+    setTimeout(whisper, 4000 + Math.random() * 6000);
+    // play a brief dissonant pair
+    var freqs = [[880, 932], [1046, 1108], [1318, 1397], [784, 830], [1174, 1244]];
+    var pair = freqs[Math.floor(Math.random() * freqs.length)];
+    var now = ctx.currentTime;
+    for (var i = 0; i < 2; i++) {
+      var o = ctx.createOscillator();
+      o.type = i === 0 ? 'sine' : 'triangle';
+      o.frequency.value = pair[i];
+      var g = ctx.createGain();
+      g.gain.setValueAtTime(0, now);
+      g.gain.linearRampToValueAtTime(0.06, now + 0.15);
+      g.gain.exponentialRampToValueAtTime(0.001, now + 1.5 + Math.random());
+      o.connect(g);
+      g.connect(dest);
+      o.start(now);
+      o.stop(now + 2);
+    }
+  }
+  setTimeout(whisper, 2000); // first whisper after 2s
+}
+
+function stopDarkBGM(fadeMs) {
+  if (!isDarkPlaying) return;
+  fadeMs = fadeMs || 800;
+  var ctx = getAudioCtx();
+  if (darkGain) {
+    darkGain.gain.cancelScheduledValues(ctx.currentTime);
+    darkGain.gain.linearRampToValueAtTime(0, ctx.currentTime + fadeMs / 1000);
+  }
+  setTimeout(function() {
+    for (var i = 0; i < darkOscs.length; i++) {
+      try { darkOscs[i].stop(); } catch(e) {}
+    }
+    darkOscs = [];
+    if (darkGain) { try { darkGain.disconnect(); } catch(e){} }
+    darkGain = null;
+    isDarkPlaying = false;
+  }, fadeMs + 100);
+}
+
+// ============================================================
+//  CELEBRATION BGM — bright major key, upbeat, fanfare-style
+// ============================================================
+function startCelebBGM() {
+  if (isCelebPlaying) return;
+  var ctx = getAudioCtx();
+  isCelebPlaying = true;
+
+  celebGain = ctx.createGain();
+  celebGain.gain.setValueAtTime(0.6, ctx.currentTime);
+  celebGain.connect(ctx.destination);
+
+  // Root pad — bright major chord (C major spread)
+  var rootFreqs = [261.63, 329.63, 392.00, 523.25]; // C4 E4 G4 C5
+  for (var r = 0; r < rootFreqs.length; r++) {
+    var p = ctx.createOscillator();
+    p.type = 'sine';
+    p.frequency.value = rootFreqs[r];
+    var pg = ctx.createGain();
+    pg.gain.value = 0.1;
+    p.connect(pg);
+    pg.connect(celebGain);
+    p.start();
+    celebOscs.push(p);
+  }
+
+  // Arpeggiator — cheerful upward arps in C major scale
+  var arpNotes = [261.63, 329.63, 392.00, 523.25, 659.25, 783.99, 659.25, 523.25,
+                  293.66, 369.99, 440.00, 587.33, 698.46, 830.61, 698.46, 587.33]; // two octaves of C & F major
+  var arpIdx = 0;
+  var arpInterval = 160; // ms per note (upbeat tempo ~150 BPM feel)
+
+  function playArpNote() {
+    if (!isCelebPlaying || !celebGain) return;
+    var ctxNow = ctx.currentTime;
+
+    // Main arp note
+    var a = ctx.createOscillator();
+    a.type = 'triangle';
+    a.frequency.value = arpNotes[arpIdx % arpNotes.length];
+    var ag = ctx.createGain();
+    ag.gain.setValueAtTime(0.18, ctxNow);
+    ag.gain.exponentialRampToValueAtTime(0.01, ctxNow + arpInterval / 1000 * 0.85);
+    a.connect(ag);
+    ag.connect(celebGain);
+    a.start(ctxNow);
+    a.stop(ctxNow + arpInterval / 1000);
+    celebOscs.push(a);
+
+    // Occasional sparkle overtone on strong beats
+    if (arpIdx % 4 === 0) {
+      var sp = ctx.createOscillator();
+      sp.type = 'sine';
+      sp.frequency.value = arpNotes[arpIdx % arpNotes.length] * 2;
+      var spg = ctx.createGain();
+      spg.gain.setValueAtTime(0.06, ctxNow);
+      spg.gain.exponentialRampToValueAtTime(0.001, ctxNow + 0.3);
+      sp.connect(spg);
+      spg.connect(celebGain);
+      sp.start(ctxNow);
+      sp.stop(ctxNow + 0.4);
+      celebOscs.push(sp);
+    }
+
+    // Simple "drum" click every other note (noise burst)
+    if (arpIdx % 2 === 0) {
+      var bufferSize = ctx.sampleRate * 0.05;
+      var buf = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      var data = buf.getChannelData(0);
+      for (var bi = 0; bi < bufferSize; bi++) {
+        data[bi] = (Math.random() * 2 - 1) * Math.exp(-bi / (bufferSize * 0.15));
+      }
+      var noise = ctx.createBufferSource();
+      noise.buffer = buf;
+      var ng = ctx.createGain();
+      ng.gain.setValueAtTime(0.15, ctxNow);
+      ng.gain.exponentialRampToValueAtTime(0.001, ctxNow + 0.08);
+      noise.connect(ng);
+      ng.connect(celebGain);
+      noise.start(ctxNow);
+    }
+
+    arpIdx++;
+    if (arpIdx >= arpNotes.length * 4) arpIdx = 0; // loop pattern
+  }
+
+  // Kick off arpeggiator loop
+  playArpNote();
+  var arpTimer = setInterval(playArpNote, arpInterval);
+  window._celebArpTimer = arpTimer;
+
+  // Bass line — simple octave jumps on roots
+  var bassNotes = [130.81, 130.81, 146.83, 164.81, // C3 C3 D3 Eb3
+                   174.61, 164.81, 146.83, 130.81]; // F3 Eb3 D3 C3
+  var bassIdx = 0;
+  function playBassNote() {
+    if (!isCelebPlaying || !celebGain) return;
+    var ctxNow = ctx.currentTime;
+    var b = ctx.createOscillator();
+    b.type = 'sine';
+    b.frequency.value = bassNotes[bassIdx % bassNotes.length];
+    var bg = ctx.createGain();
+    bg.gain.setValueAtTime(0.16, ctxNow);
+    bg.gain.exponentialRampToValueAtTime(0.001, ctxNow + 0.35);
+    b.connect(bg);
+    bg.connect(celebGain);
+    b.start(ctxNow);
+    b.stop(ctxNow + 0.4);
+    celebOscs.push(b);
+    bassIdx++;
+  }
+  playBassNote();
+  var bassTimer = setInterval(playBassNote, arpInterval * 2); // half speed of arp
+  window._celebBassTimer = bassTimer;
+
+  // Fanfare brass-like hits every 8 beats (every ~1.28s)
+  function playFanfare() {
+    if (!isCelebPlaying || !celebGain) return;
+    var ctxNow = ctx.currentTime;
+    var fanNotes = [523.25, 659.25, 783.99, 1046.50]; // C5 E5 G5 C6
+    for (var fi = 0; fi < fanNotes.length; fi++) {
+      (function(fnote, delay) {
+        var fo = ctx.createOscillator();
+        fo.type = 'sawtooth';
+        fo.frequency.value = fnote;
+        var fog = ctx.createGain();
+        fog.gain.setValueAtTime(0, ctxNow + delay);
+        fog.gain.linearRampToValueAtTime(0.09, ctxNow + delay + 0.02);
+        fog.gain.exponentialRampToValueAtTime(0.001, ctxNow + delay + 0.4);
+        fo.connect(fog);
+        fog.connect(celebGain);
+        fo.start(ctxNow + delay);
+        fo.stop(ctxNow + delay + 0.5);
+        celebOscs.push(fo);
+      })(fanNotes[fi], fi * 0.07);
+    }
+  }
+  playFanfare();
+  var fanTimer = setInterval(playFanfare, arpInterval * 8);
+  window._celebFanTimer = fanTimer;
+}
+
+function stopCelebBGM(fadeMs) {
+  if (!isCelebPlaying) return;
+  fadeMs = fadeMs || 500;
+  var ctx = getAudioCtx();
+
+  // Clear timers
+  if (window._celebArpTimer) { clearInterval(window._celebArpTimer); }
+  if (window._celebBassTimer) { clearInterval(window._celebBassTimer); }
+  if (window._celebFanTimer) { clearInterval(window._celebFanTimer); }
+
+  if (celebGain) {
+    celebGain.gain.cancelScheduledValues(ctx.currentTime);
+    celebGain.gain.linearRampToValueAtTime(0, ctx.currentTime + fadeMs / 1000);
+  }
+  setTimeout(function() {
+    for (var i = 0; i < celebOscs.length; i++) {
+      try { celebOscs[i].stop(); } catch(e) {}
+    }
+    celebOscs = [];
+    if (celebGain) { try { celebGain.disconnect(); } catch(e){} }
+    celebGain = null;
+    isCelebPlaying = false;
+  }, fadeMs + 100);
+}
+</script>
 
 <!-- Effects -->
 <div class="fx-layer fx-scan"></div>
@@ -1151,6 +1450,21 @@ function go(id) {
   // cancel pending auto-advance
   if (txTimeout) { clearTimeout(txTimeout); txTimeout = null; }
 
+  // ---- AUDIO: page-specific BGM switching ----
+  if (id === 'home' || id === 'room' || id === 'record' || id === 'review' || id === 'transmit' || id === 'result') {
+    // Dark pages — ensure dark bgm is playing, stop celebration
+    if (!isDarkPlaying) { startDarkBGM(); }
+    if (isCelebPlaying) { stopCelebBGM(300); }
+  } else if (id === 'celebration') {
+    // Celebration page — dramatic switch!
+    // 1. Fade out dark music quickly (dramatic cut)
+    if (isDarkPlaying) { stopDarkBGM(400); }
+    // 2. Start celebration music after brief pause for drama
+    setTimeout(function() {
+      startCelebBGM();
+    }, 350);
+  }
+
   // hide all screens
   var screens = document.querySelectorAll('.screen');
   for (var i = 0; i < screens.length; i++) {
@@ -1175,6 +1489,9 @@ function go(id) {
 document.getElementById('clickHands').addEventListener('click', function() {
   startTimer();
   go('room');
+  // Ensure audio context is activated on first user interaction
+  getAudioCtx();
+  if (!isDarkPlaying) { startDarkBGM(); }
 });
 
 function startTimer() {
@@ -1226,6 +1543,7 @@ document.getElementById('clickReturn').addEventListener('click', function() {
   // stop timer
   if (timerHandle) { clearInterval(timerHandle); timerHandle = null; }
   resetRings();
+  stopCelebBGM(300);
   go('home');
 });
 
@@ -1298,8 +1616,54 @@ document.getElementById('result').addEventListener('click', function(e) {
 // ---- CELEBRATION → return home ----
 document.getElementById('clickCelebrationReturn').addEventListener('click', function() {
   resetConfetti();
+  stopCelebBGM(500);
   go('home');
 });
+
+// ---- MUTE TOGGLE (floating button) ----
+var isMuted = false;
+(function initMuteBtn() {
+  var btn = document.createElement('div');
+  btn.id = 'muteBtn';
+  btn.innerHTML = '🔊';
+  btn.title = '点击静音 / 取消静音';
+  btn.style.cssText = 'position:fixed;bottom:18px;right:16px;width:40px;height:40px;border-radius:50%;background:rgba(0,0,0,0.55);color:#fff;font-size:18px;display:flex;align-items:center;justify-content:center;z-index:10000;cursor:pointer;border:1px solid rgba(255,255,255,0.15);backdrop-filter:blur(6px);transition:all 0.2s;user-select:none;-webkit-user-select:none;';
+  btn.addEventListener('touchstart', function(e) { e.preventDefault(); toggleMute(); });
+  btn.addEventListener('click', function(e) { e.preventDefault(); e.stopPropagation(); toggleMute(); });
+  document.body.appendChild(btn);
+
+  // Show on celebration page with different style
+  var origStyle = btn.style.cssText;
+  var obs = new MutationObserver(function() {
+    var celebOn = document.getElementById('celebration') && document.getElementById('celebration').classList.contains('on');
+    if (celebOn) {
+      btn.style.background = 'rgba(255,255,255,0.25)';
+      btn.style.borderColor = 'rgba(255,255,255,0.5)';
+    } else {
+      btn.style.cssText = origStyle;
+    }
+  });
+  obs.observe(document.getElementById('celebration'), { attributes: true, attributeFilter: ['class'] });
+})();
+
+function toggleMute() {
+  isMuted = !isMuted;
+  var btn = document.getElementById('muteBtn');
+  if (!btn) return;
+  btn.innerHTML = isMuted ? '🔇' : '🔊';
+  if (isMuted) {
+    stopDarkBGM(200);
+    stopCelebBGM(200);
+  } else {
+    // Resume appropriate music for current screen
+    var activeScreen = document.querySelector('.screen.on');
+    if (activeScreen && activeScreen.id === 'celebration') {
+      startCelebBGM();
+    } else if (activeScreen) {
+      startDarkBGM();
+    }
+  }
+}
 
 // ---- Confetti launcher ----
 function launchConfetti() {
